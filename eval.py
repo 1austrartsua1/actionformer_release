@@ -4,6 +4,12 @@ import os
 import glob
 import time
 from pprint import pprint
+import json 
+
+from train import getValSubsets
+import matplotlib.pyplot as plt 
+
+import numpy as np 
 
 # torch imports
 import torch
@@ -31,6 +37,7 @@ def main(args):
         assert os.path.isfile(args.ckpt), "CKPT file does not exist!"
         ckpt_file = args.ckpt
     else:
+        print(args.ckpt)
         assert os.path.isdir(args.ckpt), "CKPT file folder does not exist!"
         if args.epoch > 0:
             ckpt_file = os.path.join(
@@ -39,6 +46,7 @@ def main(args):
         else:
             ckpt_file_list = sorted(glob.glob(os.path.join(args.ckpt, '*.pth.tar')))
             ckpt_file = ckpt_file_list[-1]
+        print(ckpt_file)
         assert os.path.exists(ckpt_file)
 
     if args.topk > 0:
@@ -50,6 +58,9 @@ def main(args):
     _ = fix_random_seed(0, include_cuda=True)
 
     """2. create dataset / dataloader"""
+    if len(args.split) > 0:
+        cfg['val_split'] = [args.split]
+    
     val_dataset = make_dataset(
         cfg['dataset_name'], False, cfg['val_split'], **cfg['dataset']
     )
@@ -85,8 +96,8 @@ def main(args):
             val_dataset.split[0],
             tiou_thresholds = val_db_vars['tiou_thresholds']
         )
-    else:
-        output_file = os.path.join(os.path.split(ckpt_file)[0], 'eval_results.pkl')
+    
+    output_file = os.path.join(os.path.split(ckpt_file)[0], 'eval_results.pkl')
 
     """5. Test the model"""
     print("\nStart testing model {:s} ...".format(cfg['model_name']))
@@ -103,7 +114,7 @@ def main(args):
     )
     end = time.time()
     print("All done! Total time: {:0.2f} sec".format(end - start))
-    return
+    return mAP 
 
 ################################################################################
 if __name__ == '__main__':
@@ -117,11 +128,64 @@ if __name__ == '__main__':
                         help='path to a checkpoint')
     parser.add_argument('-epoch', type=int, default=-1,
                         help='checkpoint epoch')
+    parser.add_argument('-max_epoch', type=int, default=-1,
+                        help='checkpoint epoch')
+
     parser.add_argument('-t', '--topk', default=-1, type=int,
                         help='max number of output actions (default: -1)')
     parser.add_argument('--saveonly', action='store_true',
                         help='Only save the ouputs without evaluation (e.g., for test set)')
     parser.add_argument('-p', '--print-freq', default=10, type=int,
                         help='print frequency (default: 10 iterations)')
+    parser.add_argument('-split', type=str,
+                        help='train or val',default="")
+
+    parser.add_argument('-crossVal_holdout_num',  default=-1, type=int,
+                        help='compute results on each val split and display stats')
+    
     args = parser.parse_args()
-    main(args)
+    if args.max_epoch == -1:
+        if args.crossVal_holdout_num == -1:
+            main(args)
+        else:
+            allValSubsets = getValSubsets(args)
+            counter = 1 
+            orig_ckpt = args.ckpt 
+            allAVMaps = []
+            cfg = load_config(args.config)
+            anno_file = cfg['dataset']['json_file']
+            for val_subset in allValSubsets:
+                with open(anno_file,'r') as f:
+                    annos = json.load(f)
+                for vid in annos['database'].keys():
+                    annos['database'][vid]['subset'] = 'train'
+                for vid in val_subset:
+                    annos['database'][vid]['subset'] = 'test'
+                with open(anno_file,'w') as f:
+                    json.dump(annos,f)
+                
+                args.ckpt = orig_ckpt + "valSubset:"+str(counter)+'/'
+                print('\n\n\n\n')
+                print(f"{val_subset=}")
+                print('\n\n\n\n')
+                avMAP = main(args)
+                allAVMaps.append(avMAP)
+                counter += 1
+            print(allAVMaps)
+
+    else:
+        min_epoch = args.epoch 
+        avMAPs = []
+        for epoch in range(min_epoch,args.max_epoch+1,100):
+            args.epoch = epoch 
+            avMAP = main(args)
+            avMAPs.append(avMAP)
+        
+        plt.plot(range(min_epoch,args.max_epoch+1,100),avMAPs)
+        plt.grid()
+        plt.xlabel('epoch')
+        plt.ylabel('Av mAP')
+        plt.title('avMAP_vs_epoch:'+args.split)
+        plt.savefig('avMAP_vs_epoch:'+args.split)
+
+        print('best av map:',np.max(avMAPs))

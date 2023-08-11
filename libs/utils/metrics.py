@@ -283,7 +283,7 @@ def compute_average_precision_detection(
     # Sort predictions by decreasing score order.
     sort_idx = prediction['score'].values.argsort()[::-1]
     prediction = prediction.loc[sort_idx].reset_index(drop=True)
-
+    
     # Initialize true positive and false positive vectors.
     tp = np.zeros((len(tiou_thresholds), len(prediction)))
     fp = np.zeros((len(tiou_thresholds), len(prediction)))
@@ -293,7 +293,13 @@ def compute_average_precision_detection(
 
     # Assigning true positive to truly ground truth instances.
     for idx, this_pred in prediction.iterrows():
-
+        # +++++# +++++# +++++# +++++
+        ## pj interpretation ++++
+        # - loop through all the predicitons
+        # - for each prediction, find any ground truth segments that are in the same video
+        # - compute tiou between current prediction and all gts
+        # - 
+        # +++++# +++++# +++++# +++++
         try:
             # Check if there is at least one ground truth in the video associated.
             ground_truth_videoid = ground_truth_gbvn.get_group(this_pred['video-id'])
@@ -302,8 +308,14 @@ def compute_average_precision_detection(
             continue
 
         this_gt = ground_truth_videoid.reset_index()
+        #print(f"{this_pred['label']=}")
+        #print(f"{list(this_gt['label'])=}")
+        
+        
         tiou_arr = segment_iou(this_pred[['t-start', 't-end']].values,
                                this_gt[['t-start', 't-end']].values)
+        
+        
         # We would like to retrieve the predictions with highest tiou score.
         tiou_sorted_idx = tiou_arr.argsort()[::-1]
         for tidx, tiou_thr in enumerate(tiou_thresholds):

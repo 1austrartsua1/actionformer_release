@@ -6,7 +6,7 @@ DEFAULTS = {
     "init_rand_seed": 1234567891,
     # dataset loader, specify the dataset here
     "dataset_name": "epic",
-    "devices": ['cuda:0'], # default: single gpu
+    "devices": ['cuda:2'], # default: single gpu
     "train_split": ('training', ),
     "val_split": ('validation', ),
     "model_name": "LocPointTransformer",
@@ -79,6 +79,11 @@ DEFAULTS = {
         "use_abs_pe": False,
         # use rel position encoding (added to self-attention)
         "use_rel_pe": False,
+        # PJ: if model trained with different feat extractor and 
+        # wish to fine tune, set diff_feat_dim to the dim of 
+        # the other feature extractor. This will insert a linear
+        # layer projecting diff_feat_dim to input_dim 
+        "diff_feat_dim": -1,
     },
     "train_cfg": {
         # radius | none (if to use center sampling)

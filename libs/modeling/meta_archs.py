@@ -190,7 +190,8 @@ class PtTransformer(nn.Module):
         use_rel_pe,            # if to use rel position encoding
         num_classes,           # number of action classes
         train_cfg,             # other cfg for training
-        test_cfg               # other cfg for testing
+        test_cfg,              # other cfg for testing
+        diff_feat_dim          # for fine-tuning model trained on different feature extractor
     ):
         super().__init__()
          # re-distribute params to backbone / neck / head
@@ -323,6 +324,10 @@ class PtTransformer(nn.Module):
         # useful for small mini-batch training
         self.loss_normalizer = train_cfg['init_loss_norm']
         self.loss_normalizer_momentum = 0.9
+        self.projectFeatures = False 
+        if diff_feat_dim>0:
+            self.featureProject = nn.Linear(diff_feat_dim,input_dim)
+            self.projectFeatures = True 
 
     @property
     def device(self):
@@ -333,7 +338,12 @@ class PtTransformer(nn.Module):
     def forward(self, video_list):
         # batch the video list into feats (B, C, T) and masks (B, 1, T)
         batched_inputs, batched_masks = self.preprocessing(video_list)
-
+        
+        #print(f"{batched_inputs.shape=}")
+        #exit()
+        if self.projectFeatures:
+            batched_inputs = self.featureProject(batched_inputs)
+        
         # forward the network (backbone -> neck -> heads)
         feats, masks = self.backbone(batched_inputs, batched_masks)
         fpn_feats, fpn_masks = self.neck(feats, masks)

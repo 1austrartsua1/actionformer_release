@@ -7,6 +7,8 @@ import numpy as np
 import random
 from copy import deepcopy
 
+
+
 import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
@@ -255,7 +257,7 @@ def train_one_epoch(
     model_ema = None,
     clip_grad_l2norm = -1,
     tb_writer = None,
-    print_freq = 20
+    print_freq = 0
 ):
     """Training the model for one epoch"""
     # set up meters
@@ -269,6 +271,7 @@ def train_one_epoch(
     # main training loop
     print("\n[Train]: Epoch {:d} started".format(curr_epoch))
     start = time.time()
+    pj_losses = []
     for iter_idx, video_list in enumerate(train_loader, 0):
         # zero out optim
         optimizer.zero_grad(set_to_none=True)
@@ -290,6 +293,7 @@ def train_one_epoch(
 
         # printing (only check the stats when necessary to avoid extra cost)
         if (iter_idx != 0) and (iter_idx % print_freq) == 0:
+            
             # measure elapsed time (sync all kernels)
             torch.cuda.synchronize()
             batch_time.update((time.time() - start) / print_freq)
@@ -341,6 +345,7 @@ def train_one_epoch(
                 losses_tracker['final_loss'].val,
                 losses_tracker['final_loss'].avg
             )
+            pj_losses.append(losses_tracker['final_loss'].val)
             block4 = ''
             for key, value in losses_tracker.items():
                 if key != "final_loss":
@@ -353,7 +358,7 @@ def train_one_epoch(
     # finish up and print
     lr = scheduler.get_last_lr()[0]
     print("[Train]: Epoch {:d} finished with lr={:.8f}\n".format(curr_epoch, lr))
-    return
+    return pj_losses
 
 
 def valid_one_epoch(
@@ -364,7 +369,7 @@ def valid_one_epoch(
     evaluator = None,
     output_file = None,
     tb_writer = None,
-    print_freq = 20
+    print_freq = 20,
 ):
     """Test the model on the validation set"""
     # either evaluate the results or save the results
@@ -385,13 +390,15 @@ def valid_one_epoch(
 
     # loop over validation set
     start = time.time()
+    
+    
     for iter_idx, video_list in enumerate(val_loader, 0):
         # forward the model (wo. grad)
         with torch.no_grad():
             output = model(video_list)
-
             # unpack the results into ANet format
             num_vids = len(output)
+
             for vid_idx in range(num_vids):
                 if output[vid_idx]['segments'].shape[0] > 0:
                     results['video-id'].extend(
@@ -420,17 +427,20 @@ def valid_one_epoch(
     results['t-end'] = torch.cat(results['t-end']).numpy()
     results['label'] = torch.cat(results['label']).numpy()
     results['score'] = torch.cat(results['score']).numpy()
-
+    
     if evaluator is not None:
         if ext_score_file is not None and isinstance(ext_score_file, str):
             results = postprocess_results(results, ext_score_file)
         # call the evaluator
         _, mAP, _ = evaluator.evaluate(results, verbose=True)
     else:
-        # dump to a pickle file that can be directly used for evaluation
-        with open(output_file, "wb") as f:
-            pickle.dump(results, f)
+        
+        
         mAP = 0.0
+
+    # dump to a pickle file that can be directly used for eval and debugging
+    with open(output_file, "wb") as f:
+        pickle.dump(results, f)
 
     # log mAP to tb_writer
     if tb_writer is not None:

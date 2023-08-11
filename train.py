@@ -5,6 +5,14 @@ import time
 import datetime
 from pprint import pprint
 
+import sys 
+sys.path.append('/home/pjohnstone/storyboard/actFormer_e2e')
+from loopThroughSubsets import getAllSubsets
+
+import json
+
+import matplotlib.pyplot as plt 
+
 # torch imports
 import torch
 import torch.nn as nn
@@ -45,6 +53,7 @@ def main(args):
     else:
         ckpt_folder = os.path.join(
             cfg['output_folder'], cfg_filename + '_' + str(args.output))
+            
     if not os.path.exists(ckpt_folder):
         os.mkdir(ckpt_folder)
     # tensorboard writer
@@ -119,9 +128,11 @@ def main(args):
         'early_stop_epochs',
         cfg['opt']['epochs'] + cfg['opt']['warmup_epochs']
     )
+    
+    pj_all_losses = []
     for epoch in range(args.start_epoch, max_epochs):
         # train for one epoch
-        train_one_epoch(
+        pj_losses = train_one_epoch(
             train_loader,
             model,
             optimizer,
@@ -132,6 +143,15 @@ def main(args):
             tb_writer=tb_writer,
             print_freq=args.print_freq
         )
+        pj_all_losses.extend(pj_losses)
+        # plot the loss 
+        plt.figure()
+        
+        plt.semilogy(pj_all_losses,'-o')
+        plt.grid()
+        plt.title('loss over time')
+        plt.savefig('lossPlot')
+        plt.close()
 
         # save ckpt once in a while
         if (
@@ -153,10 +173,22 @@ def main(args):
                 file_name='epoch_{:03d}.pth.tar'.format(epoch + 1)
             )
 
+    
+
     # wrap up
     tb_writer.close()
     print("All done!")
     return
+
+def getValSubsets(args):
+    cfg = load_config(args.config)
+    anno_file = cfg['dataset']['json_file']
+    with open(anno_file,'r') as f:
+        annos = json.load(f)
+    vid_files = list(annos['database'].keys())
+
+    allValSubsets = getAllSubsets(vid_files,args.crossVal_holdout_num)
+    return allValSubsets
 
 ################################################################################
 if __name__ == '__main__':
@@ -166,13 +198,51 @@ if __name__ == '__main__':
       description='Train a point-based transformer for action localization')
     parser.add_argument('config', metavar='DIR',
                         help='path to a config file')
-    parser.add_argument('-p', '--print-freq', default=10, type=int,
-                        help='print frequency (default: 10 iterations)')
+    parser.add_argument('-p', '--print-freq', default=1, type=int,
+                        help='print frequency (default: 1 iterations)')
     parser.add_argument('-c', '--ckpt-freq', default=5, type=int,
                         help='checkpoint frequency (default: every 5 epochs)')
     parser.add_argument('--output', default='', type=str,
                         help='name of exp folder (default: none)')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to a checkpoint (default: none)')
+    parser.add_argument('-crossVal_holdout_num', default=-1, type=int,
+                        help='numVids to hold out in crossVal')
+
     args = parser.parse_args()
-    main(args)
+    if args.crossVal_holdout_num == -1:
+        main(args)
+    else:
+        cfg = load_config(args.config)
+        anno_file = cfg['dataset']['json_file']
+        with open(anno_file,'r') as f:
+            annos = json.load(f)
+        vid_files = list(annos['database'].keys())
+
+        allValSubsets = getAllSubsets(vid_files,args.crossVal_holdout_num)
+        counter = 1 
+        output_orig = args.output 
+        for val_subset in allValSubsets:
+            with open(anno_file,'r') as f:
+                annos = json.load(f)
+            for vid in annos['database'].keys():
+                if annos['database'][vid]['subset'] not in ['train','test']:
+                    continue
+                annos['database'][vid]['subset'] = 'train'
+            for vid in val_subset:
+                if annos['database'][vid]['subset'] not in ['train','test']:
+                    continue
+                    
+                annos['database'][vid]['subset'] = 'test'
+            with open(anno_file,'w') as f:
+                json.dump(annos,f)
+            
+            args.output = output_orig + "valSubset:"+str(counter)
+            main(args)
+            counter += 1
+
+
+        
+
+        
+
